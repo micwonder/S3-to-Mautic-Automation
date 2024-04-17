@@ -86,5 +86,3 @@ This project is licensed under the MIT License - see the [LICENSE.md](LICENSE) f
 - Replace `https://github.com/micwonder/Mautic-S3-Importer.git` with the actual URL of your GitHub repository.
 - Customize the installation and usage instructions based on your exact script configurations and user environment.
 - Ensure all paths and example commands are accurate to avoid user confusion.
-
-This README template aims to provide clear, detailed instructions and background information to help users successfully implement and utilize your script.

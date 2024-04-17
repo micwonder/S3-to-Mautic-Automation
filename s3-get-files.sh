@@ -8,39 +8,60 @@ log() {
     echo "$(date +"%Y-%m-%d %H:%M:%S") $1" >> "$log_file"
 }
 
-# Get the files in the directory
-log "Listing files in the S3 directory"
-files=$(s3cmd ls s3://infinity-91872 | cut -d/ -f4)
-s3cmd ls s3://infinity-91872 -r | cut -d/ -f4
-log "Getting $files from S3"
+# Create a unique processing directory name with timestamp
+processing_dir="processing_$(date +"%Y-%m-%d_%H-%M-%S")"
+s3cmd mb "s3://infinity-91872/$processing_dir"
+log "Created processing directory: $processing_dir"
 
-s3cmd get "s3://infinity-91872/$files" "/root/SCRIPTS/tmp/"
+# List and filter files, excluding those in processing directories
+files=$(s3cmd ls s3://infinity-91872 | grep -v ' DIR ' | awk '{print $4}' | grep -v '^$')
+
+for file in $files; do
+    if [[ $(basename "$file") == processing_* ]]; then
+        log "Skipping already processing file: $file"
+        continue
+    fi
+
+    dest="s3://infinity-91872/$processing_dir/$(basename "$file")"
+    s3cmd mv "$file" "$dest"
+    log "Moved $file to $dest"
+done
 
 # Define the source and target directories
 src_dir="/root/SCRIPTS/tmp/"
 target_dir="/root/IMPORTS/"
 
-# Move the file to import directory
-log "Moving $files to import directory"
-cp "$src_dir$files" "$target_dir"
+# Ensure directories exist
+mkdir -p "$src_dir"
+mkdir -p "$target_dir"
 
-# Run the import
-log "Starting import process"
+# Download files from the processing directory to local storage
+s3cmd sync "s3://infinity-91872/$processing_dir/" "$src_dir"
+log "Files synced to local storage for processing."
 
-# Get a list of all files in the source directory
-log "Listing files in source directory"
+# Process each file
 files=($(ls "$src_dir"))
-
-# Loop through each file
 for file in "${files[@]}"; do
-    log "Starting import for file $file"
-    # Copy the file to the target directory
-    mv "$src_dir$file" "$target_dir$file"
-    # Run the AMS import command
-    php /var/www/ams/bin/console mautic:import:directory >> "$log_file" 2>&1
-    php /var/www/ams/bin/console mautic:import >> "$log_file" 2>&1
-    log "Import finished for file $file"
+    if [ -f "$src_dir$file" ]; then
+        log "Starting import for file $file"
+        
+        # If processing is successful, move the file to the target directory.
+        mv "$src_dir$file" "$target_dir"
+        log "Moved $file to $target_dir"
+
+        # Run the AMS import command. Replace or add actual commands as needed.
+        php /var/www/ams/bin/console mautic:import:directory "$target_dir$file" >> "$log_file" 2>&1
+        php /var/www/ams/bin/console mautic:import "$target_dir$file" >> "$log_file" 2>&1
+        log "Import finished for file $file"
+
+        # After successful processing, delete the file from the S3 processing directory
+        s3cmd del "s3://infinity-91872/$processing_dir/$file"
+        if [ $? -eq 0 ]; then
+            log "Successfully deleted $file from S3 processing directory."
+        else
+            log "Failed to delete $file from S3 processing directory."
+        fi
+    fi
 done
 
-log "Script execution completed"
-
+log "Script execution completed."
