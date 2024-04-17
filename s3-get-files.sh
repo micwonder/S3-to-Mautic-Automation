@@ -11,7 +11,6 @@ log() {
         echo "$(date +"%Y-%m-%d %H:%M:%S") $1" >> "$log_file"
 }
 
-
 log "---------------------------------------------"
 
 # Setup the fixed-length processing directory name
