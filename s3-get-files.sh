@@ -23,6 +23,7 @@ padding_needed=$((required_length - ${#base_processing_dir}))
 padding=$(printf '%*s' "$padding_needed" '' | tr ' ' '_')
 processing_dir="${base_processing_dir}${padding}__"
 
+
 # Function to check if a file is a processing file
 is_processing_file() {
         local filename=$1
