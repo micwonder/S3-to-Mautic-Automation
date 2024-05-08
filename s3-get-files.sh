@@ -11,6 +11,7 @@ log() {
         echo "$(date +"%Y-%m-%d %H:%M:%S") $1" >> "$log_file"
 }
 
+
 log "---------------------------------------------"
 
 # Setup the fixed-length processing directory name
@@ -21,6 +22,7 @@ required_length=31
 padding_needed=$((required_length - ${#base_processing_dir}))
 padding=$(printf '%*s' "$padding_needed" '' | tr ' ' '_')
 processing_dir="${base_processing_dir}${padding}__"
+
 
 # Function to check if a file is a processing file
 is_processing_file() {
@@ -62,10 +64,22 @@ IFS=$'\n'
 # List and filter files, excluding those in processing directories
 # files=$(s3cmd ls s3://infinity-91872 | grep -v ' DIR ' | awk '{print $4}' | grep -v '^$')
 # files=$(s3cmd ls s3://infinity-91872 | awk '{print $4}' | xargs -n 1 basename)
-files=($(s3cmd ls s3://infinity-91872 --recursive | cut -d/ -f4))
+# files=($(s3cmd ls s3://infinity-91872 --recursive | cut -d/ -f4))
 # files=($(s3cmd ls s3://infinity-91872 --recursive | awk '{print substr($0, index($0,$3))}' | grep -v '^$'))
 
 # files=($(s3cmd ls s3://infinity-91872 --recursive | rev | cut -d/ -f1 | rev))
+
+# Initialize the files array here
+files=()
+
+# Loop through the output of aws s3 ls instead of previous s3cmd
+while IFS= read -r line; do
+	# file name
+	filename=$(echo "$line" | awk '{$1=$2=$3=""; print $0}' | sed 's/^[[:space:]]*//')
+	# append
+	files+=("$filename")
+done < <(aws s3 ls s3://infinity-91872)
+
 
 IFS="$OLD_IFS"
 
@@ -74,12 +88,12 @@ declare -a processible_paths
 
 for file in "${files[@]}"; do
         echo "Checking file"
-        processible_paths+=("$file")
+        # processible_paths+=("$file")
         if is_processing_file "$file"; then
                 log "Skipping already in processing file: $file"
                 continue
         fi
-
+	processible_paths+=("$file")
         # Construct the full file path and destination path
         file_path="s3://infinity-91872/$file"
         dest_path="s3://infinity-91872/$processing_dir$file"
@@ -104,39 +118,42 @@ target_dir="/root/IMPORTS/"
 # mkdir -p "$src_dir"
 mkdir -p "$target_dir"
 
-log "Directories ensured"
+log "Directories ensured ..."
 
 
 # Process each file
 for file in "${processible_paths[@]}"; do
-        local_path="$target_dir$file"
+        local_path="$target_dir"
         dest_path="s3://infinity-91872/$processing_dir$file"
+	original_path="s3://infinity-91872/$file"
 
         # Download the file from S3 to the local target directory
-        aws s3 cp "${dest_path}" "$local_path"
+        aws s3 cp "${dest_path}" "${local_path}"
         if [ $? -eq 0 ]; then
                 log "Downloaded \"$file\" to local processing directory"
 
                 # If the file exists locally, proceed with mautic
-                if [ -f "$local_path" ]; then
-                        log "Starting import for file $file"
+                # if [ -f "$local_path" ]; then
 
-                        # Run the AMS import command
-                        php /var/www/ams/bin/console mautic:import:directory >> "$log_file" 2>&1
-                        php /var/www/ams/bin/console mautic:import >> "$log_file" 2>&1
-                        log "Import finished for file $file"
+                log "Starting import for file $file"
 
-                        # I don't know why it is necessary but delete the s3 bucket file
-                        if aws s3 rm "${dest_path}"; then
-                                log "Deleted original file $file"
-                        else
-                                log "Failed to delete original s3 object $file"
-                        fi
-                        # Optionally, delete the local file after processing
-                        # rm "$local_path"
+                # Run the AMS import command
+                php /var/www/ams/bin/console mautic:import:directory >> "$log_file" 2>&1
+                php /var/www/ams/bin/console mautic:import >> "$log_file" 2>&1
+                log "Import finished for file $file"
+
+                # I don't know why it is necessary but delete the s3 bucket file
+                if aws s3 rm "${dest_path}"; then
+			s3cmd rm "${file}"
+                        log "Deleted original file $file"
                 else
-                        log "File not found for processing : $file"
+                        log "Failed to delete original s3 object $file"
                 fi
+                # Optionally, delete the local file after processing
+                # rm "$local_path"
+                # else
+                #         log "File not found for processing : $file"
+                # fi
         else
                 log "Failed to download \"$file\" from S3 to local processing directory"
         fi
